@@ -48,6 +48,7 @@
             
             <div class="tabs">
                 <button class="tab-btn active" data-tab="copywriting">文案生成</button>
+                <button class="tab-btn" data-tab="subtitle">获取B站字幕</button>
                 <button class="tab-btn" data-tab="tts">TTS合成</button>
                 <button class="tab-btn" data-tab="imageGeneration">图片生成</button>
                 <button class="tab-btn" data-tab="prompts">常用提示词</button>
@@ -61,17 +62,17 @@
                         <div class="card">
                             <h3>生成视频文案</h3>
                             <p class="hint">输入B站视频链接，AI将自动生成TTS文案和图像提示词</p>
-                            
+
                             <div class="input-group">
                                 <label for="videoUrl">视频链接</label>
-                                <input 
-                                    type="text" 
-                                    id="videoUrl" 
+                                <input
+                                    type="text"
+                                    id="videoUrl"
                                     placeholder="例如: https://www.bilibili.com/video/BVxxxxxxxxx"
                                     class="input-field"
                                 >
                             </div>
-                            
+
                             <button class="btn-primary btn-large" onclick="generateCopywriting()">生成文案</button>
                         </div>
                     </div>
@@ -103,7 +104,46 @@
                         <p>正在生成文案...</p>
                     </div>
                 </div>
-                
+
+                <!-- 获取B站字幕Tab -->
+                <div id="subtitleTab" class="tab-pane">
+                    <div class="card">
+                        <h3>获取B站字幕</h3>
+                        <p class="hint">调用本地 HTTP Tools 接口获取字幕文本，支持多语言版本</p>
+
+                        <div class="input-group">
+                            <label for="subtitleUrl">B站视频链接</label>
+                            <input
+                                type="text"
+                                id="subtitleUrl"
+                                placeholder="例如: https://www.bilibili.com/video/BVxxxxxxxxx"
+                                class="input-field"
+                            >
+                        </div>
+
+                        <button id="subtitleFetchBtn" class="btn-secondary" onclick="fetchBilibiliSubtitle('subtitle')">获取字幕</button>
+
+                        <div id="subtitleResult" class="content-display" style="display: none; margin-top: 1rem;">
+                            <div class="result-header" style="margin-bottom: 0.75rem;">
+                                <div>
+                                    <h4>字幕内容</h4>
+                                    <p id="subtitleMeta" class="hint" style="margin: 0;"></p>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                    <label for="subtitleLanguageSelect" class="hint" style="margin: 0;">语言版本</label>
+                                    <select id="subtitleLanguageSelect" class="input-field" style="padding: 0.25rem 0.5rem; width: auto; min-width: 120px;" onchange="switchSubtitleLanguage()"></select>
+                                    <label class="hint" style="display: flex; align-items: center; gap: 0.35rem; margin: 0 0 0 0.5rem;">
+                                        <input type="checkbox" id="subtitleToggleTimestamp" onchange="toggleSubtitleTimestamp()">
+                                        显示时间戳
+                                    </label>
+                                    <button class="btn-secondary" onclick="copySubtitleText('subtitle')">复制字幕</button>
+                                </div>
+                            </div>
+                            <div id="subtitleContent" class="text-content" style="white-space: pre-wrap;"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- TTS合成Tab -->
                 <div id="ttsTab" class="tab-pane">
                     <div class="card">

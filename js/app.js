@@ -402,6 +402,298 @@ function resetCopywritingTab() {
     document.getElementById('videoUrl').value = '';
 }
 
+// B站字幕获取配置
+const SUBTITLE_WIDGETS = {
+    subtitle: {
+        inputId: 'subtitleUrl',
+        resultContainerId: 'subtitleResult',
+        contentId: 'subtitleContent',
+        buttonId: 'subtitleFetchBtn',
+        languageSelectId: 'subtitleLanguageSelect',
+        metaId: 'subtitleMeta',
+        toggleId: 'subtitleToggleTimestamp'
+    }
+};
+
+const SUBTITLE_STATE = {
+    items: [],
+    useTimestamp: false,
+    meta: null,
+    selectedIndex: 0
+};
+
+// 通过本地工具获取B站字幕
+async function fetchBilibiliSubtitle(context) {
+    const config = SUBTITLE_WIDGETS[context];
+    if (!config) {
+        return;
+    }
+
+    const urlInput = document.getElementById(config.inputId);
+    const videoUrl = urlInput ? urlInput.value.trim() : '';
+
+    if (!videoUrl) {
+        showNotification('请输入B站视频链接', 'error');
+        return;
+    }
+
+    setSubtitleLoading(config.buttonId, true);
+
+    try {
+        const response = await fetch('http://127.0.0.1:5055/get-bilibili-subtitle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ url: videoUrl, text_only: true })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+        const parsed = parseSubtitleResponse(result);
+
+        if (parsed.status === 'failed') {
+            SUBTITLE_STATE.items = [];
+            SUBTITLE_STATE.useTimestamp = false;
+            SUBTITLE_STATE.meta = null;
+            SUBTITLE_STATE.selectedIndex = 0;
+            const toggle = document.getElementById(config.toggleId);
+            if (toggle) {
+                toggle.checked = false;
+            }
+            displaySubtitleFailure(config, parsed.message);
+            showNotification(parsed.message, 'error');
+            return;
+        }
+
+        if (parsed.status !== 'success') {
+            throw new Error(parsed.message || '未获取到字幕内容');
+        }
+
+        SUBTITLE_STATE.items = parsed.items;
+        SUBTITLE_STATE.useTimestamp = false;
+        SUBTITLE_STATE.meta = {
+            title: parsed.title || '',
+            host: parsed.host || '',
+            vid: parsed.vid || ''
+        };
+        SUBTITLE_STATE.selectedIndex = 0;
+
+        const toggle = document.getElementById(config.toggleId);
+        if (toggle) {
+            toggle.checked = false;
+        }
+
+        displaySubtitleResult(config, parsed);
+        showNotification('字幕获取成功', 'success');
+    } catch (error) {
+        console.error('获取B站字幕失败:', error);
+        showNotification(`获取字幕失败: ${error.message}`, 'error');
+    } finally {
+        setSubtitleLoading(config.buttonId, false);
+    }
+}
+
+function parseSubtitleResponse(result) {
+    const responseData = result && result.data;
+    const payload = responseData && typeof responseData === 'object' ? responseData.data : null;
+
+    if (!payload) {
+        return { status: 'error', message: '无效的字幕响应' };
+    }
+
+    const statusText = payload.status || '';
+    const rawList = Array.isArray(payload.subtitleItemVoList) ? payload.subtitleItemVoList : [];
+
+    const items = rawList.map((item, index) => ({
+        lang: item.langDesc || item.lang || `版本${index + 1}`,
+        text: (item.content || '').trim(),
+        withTimestamp: (item.content_with_timestamp || '').trim()
+    })).filter(item => item.text || item.withTimestamp);
+
+    if (statusText.includes('失败') || items.length === 0) {
+        return { status: 'failed', message: '解析失败，无法识别视频中的字幕' };
+    }
+
+    return {
+        status: 'success',
+        items,
+        title: payload.title || '',
+        host: payload.hostAlias || payload.host || '',
+        vid: payload.vid || ''
+    };
+}
+
+function displaySubtitleResult(config, parsed) {
+    const container = document.getElementById(config.resultContainerId);
+    const content = document.getElementById(config.contentId);
+    const selector = document.getElementById(config.languageSelectId);
+    const meta = document.getElementById(config.metaId);
+
+    if (!container || !content || !selector) {
+        return;
+    }
+
+    selector.innerHTML = '';
+    parsed.items.forEach((item, index) => {
+        const option = document.createElement('option');
+        option.value = String(index);
+        option.textContent = item.lang || `版本${index + 1}`;
+        selector.appendChild(option);
+    });
+
+    selector.value = '0';
+    SUBTITLE_STATE.selectedIndex = 0;
+
+    const metaParts = [];
+    if (parsed.title) metaParts.push(parsed.title);
+    if (parsed.host) metaParts.push(parsed.host);
+    if (parsed.vid) metaParts.push(`VID: ${parsed.vid}`);
+    if (meta) {
+        meta.textContent = metaParts.join(' · ');
+    }
+
+    updateSubtitleContent(content, selector.value);
+    container.style.display = 'block';
+}
+
+function displaySubtitleFailure(config, message) {
+    const container = document.getElementById(config.resultContainerId);
+    const content = document.getElementById(config.contentId);
+    const selector = document.getElementById(config.languageSelectId);
+    const meta = document.getElementById(config.metaId);
+
+    if (selector) {
+        selector.innerHTML = '';
+    }
+    if (meta) {
+        meta.textContent = '';
+    }
+    if (content) {
+        content.textContent = message || '解析失败，无法识别视频中的字幕';
+    }
+    if (container) {
+        container.style.display = 'block';
+    }
+}
+
+function updateSubtitleContent(contentElement, selectedIndex) {
+    if (!contentElement) return;
+
+    const index = Number(selectedIndex) || 0;
+    const item = SUBTITLE_STATE.items[index];
+
+    if (!item) {
+        contentElement.textContent = '';
+        return;
+    }
+
+    const textToShow = SUBTITLE_STATE.useTimestamp && item.withTimestamp
+        ? item.withTimestamp
+        : (item.text || item.withTimestamp || '');
+
+    contentElement.textContent = textToShow;
+}
+
+function setSubtitleLoading(buttonId, isLoading) {
+    const button = document.getElementById(buttonId);
+    if (!button) {
+        return;
+    }
+
+    button.disabled = isLoading;
+    button.textContent = isLoading ? '获取中...' : '获取字幕';
+}
+
+function switchSubtitleLanguage() {
+    const config = SUBTITLE_WIDGETS.subtitle;
+    if (!config) return;
+
+    const selector = document.getElementById(config.languageSelectId);
+    const content = document.getElementById(config.contentId);
+    if (!selector || !content) return;
+
+    SUBTITLE_STATE.selectedIndex = Number(selector.value) || 0;
+    updateSubtitleContent(content, selector.value);
+}
+
+function toggleSubtitleTimestamp() {
+    const config = SUBTITLE_WIDGETS.subtitle;
+    if (!config) return;
+
+    const toggle = document.getElementById(config.toggleId);
+    const content = document.getElementById(config.contentId);
+    const selector = document.getElementById(config.languageSelectId);
+    if (!toggle || !content || !selector) return;
+
+    SUBTITLE_STATE.useTimestamp = !!toggle.checked;
+    updateSubtitleContent(content, selector.value);
+}
+
+function copySubtitleText(context) {
+    const config = SUBTITLE_WIDGETS[context];
+    if (!config) {
+        return;
+    }
+
+    const content = document.getElementById(config.contentId);
+    if (!content || !content.textContent) {
+        showNotification('没有可复制的字幕内容', 'error');
+        return;
+    }
+
+    navigator.clipboard.writeText(content.textContent)
+        .then(() => showNotification('字幕已复制', 'success'))
+        .catch(error => {
+            console.error('复制字幕失败:', error);
+            showNotification('复制失败，请手动选择复制', 'error');
+        });
+}
+
+function restoreSubtitleFromDraft(draftData) {
+    const config = SUBTITLE_WIDGETS.subtitle;
+    if (!config) return;
+
+    const subtitleItems = Array.isArray(draftData.subtitleItems) ? draftData.subtitleItems : [];
+    if (subtitleItems.length === 0) {
+        return;
+    }
+
+    SUBTITLE_STATE.items = subtitleItems;
+    SUBTITLE_STATE.useTimestamp = !!draftData.subtitleUseTimestamp;
+    SUBTITLE_STATE.selectedIndex = typeof draftData.subtitleSelectedIndex === 'number'
+        ? Math.max(0, Math.min(subtitleItems.length - 1, draftData.subtitleSelectedIndex))
+        : 0;
+    SUBTITLE_STATE.meta = draftData.subtitleMeta || null;
+
+    const parsed = {
+        items: subtitleItems,
+        title: draftData.subtitleMeta?.title || '',
+        host: draftData.subtitleMeta?.host || '',
+        vid: draftData.subtitleMeta?.vid || ''
+    };
+
+    displaySubtitleResult(config, parsed);
+
+    const selector = document.getElementById(config.languageSelectId);
+    if (selector) {
+        selector.value = String(SUBTITLE_STATE.selectedIndex);
+    }
+
+    const toggle = document.getElementById(config.toggleId);
+    if (toggle) {
+        toggle.checked = SUBTITLE_STATE.useTimestamp;
+    }
+
+    const content = document.getElementById(config.contentId);
+    if (content) {
+        updateSubtitleContent(content, selector ? selector.value : 0);
+    }
+}
+
 // 生成文案
 async function generateCopywriting() {
     const videoUrl = document.getElementById('videoUrl').value.trim();
@@ -1740,6 +2032,11 @@ async function saveDraft() {
         timestamp: new Date().toISOString(),
         // 文案生成部分
         videoUrl: document.getElementById('videoUrl')?.value || '',
+        subtitleUrl: document.getElementById('subtitleUrl')?.value || '',
+        subtitleItems: SUBTITLE_STATE.items || [],
+        subtitleUseTimestamp: SUBTITLE_STATE.useTimestamp,
+        subtitleMeta: SUBTITLE_STATE.meta,
+        subtitleSelectedIndex: SUBTITLE_STATE.selectedIndex,
         // TTS部分
         apiKey: document.getElementById('apiKey')?.value || '',
         promptAudioUrl: document.getElementById('promptAudioUrl')?.value || '',
@@ -1845,9 +2142,10 @@ async function loadDraft(autoLoad = false) {
         }
         
         const draftData = result.data;
-        
+
         // 恢复所有输入框内容
         if (document.getElementById('videoUrl')) document.getElementById('videoUrl').value = draftData.videoUrl || '';
+        if (document.getElementById('subtitleUrl')) document.getElementById('subtitleUrl').value = draftData.subtitleUrl || '';
         if (document.getElementById('apiKey')) document.getElementById('apiKey').value = draftData.apiKey || '';
         if (document.getElementById('promptAudioUrl')) document.getElementById('promptAudioUrl').value = draftData.promptAudioUrl || '';
         if (document.getElementById('promptText')) document.getElementById('promptText').value = draftData.promptText || '';
@@ -1906,11 +2204,14 @@ async function loadDraft(autoLoad = false) {
         // 恢复路径显示框
         if (document.getElementById('characterImagePath')) document.getElementById('characterImagePath').value = draftData.characterImagePath || '';
         if (document.getElementById('backgroundImagePath')) document.getElementById('backgroundImagePath').value = draftData.backgroundImagePath || '';
-        
+
         // 恢复结果容器显示状态
         if (document.getElementById('characterResultContainer')) document.getElementById('characterResultContainer').style.display = draftData.characterResultContainerVisible ? 'block' : 'none';
         if (document.getElementById('backgroundResultContainer')) document.getElementById('backgroundResultContainer').style.display = draftData.backgroundResultContainerVisible ? 'block' : 'none';
-        
+
+        // 恢复字幕内容
+        restoreSubtitleFromDraft(draftData);
+
         // 只有在非自动加载或有新加载的数据时才显示成功消息
         if (!autoLoad) {
             showNotification('草稿已加载！', 'success');
